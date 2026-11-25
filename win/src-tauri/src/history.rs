@@ -439,38 +439,22 @@ fn read_identity(path: &Path) -> Option<FileIdentity> {
 
 #[cfg(windows)]
 fn windows_file_id(path: &Path) -> Option<(u64, u64)> {
-    use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::Storage::FileSystem::{
-        CreateFileW, GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
-        FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
-        OPEN_EXISTING,
+        GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
     };
 
-    let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
-    wide.push(0);
-    unsafe {
-        let handle = CreateFileW(
-            wide.as_ptr(),
-            0,
-            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-            std::ptr::null(),
-            OPEN_EXISTING,
-            FILE_FLAG_BACKUP_SEMANTICS,
-            std::ptr::null_mut(),
-        );
-        if handle == INVALID_HANDLE_VALUE {
-            return None;
-        }
-        let mut info: BY_HANDLE_FILE_INFORMATION = std::mem::zeroed();
-        let ok = GetFileInformationByHandle(handle, &mut info);
-        CloseHandle(handle);
-        if ok == 0 {
-            return None;
-        }
-        let idx = ((info.nFileIndexHigh as u64) << 32) | (info.nFileIndexLow as u64);
-        Some((info.dwVolumeSerialNumber as u64, idx))
+    // 用 std 自己开句柄，不再自己调 CreateFileW：少一个 API 依赖，
+    // 文件被占用时老实返回 None（身份拿不到就不缓存，与 Swift 侧读不到属性同义）
+    let file = fs::File::open(path).ok()?;
+    let handle = file.as_raw_handle() as windows_sys::Win32::Foundation::HANDLE;
+    let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+    let ok = unsafe { GetFileInformationByHandle(handle, &mut info) };
+    if ok == 0 {
+        return None;
     }
+    let idx = ((info.nFileIndexHigh as u64) << 32) | (info.nFileIndexLow as u64);
+    Some((info.dwVolumeSerialNumber as u64, idx))
 }
 
 fn snapshot_identity(path: &Path) -> Option<FileIdentity> {
@@ -673,11 +657,14 @@ pub fn invalidate_project(project: &str, agent_dir: &Path) {
         purge_directory_locked(&mut state, &dir);
     }
     state.entry_cache.retain(|_, v| v.project_key != pkey);
-    let ec = &state.entry_cache;
-    state.entry_order.retain(|k| ec.contains_key(k));
+    // 先把手上的顺序表取出来，避免同时可变/不可变借用同一个 state
+    let mut entry_order = std::mem::take(&mut state.entry_order);
+    entry_order.retain(|k| state.entry_cache.contains_key(k));
+    state.entry_order = entry_order;
     state.summary_cache.retain(|_, v| v.project_key != pkey);
-    let sc = &state.summary_cache;
-    state.summary_order.retain(|k| sc.contains_key(k));
+    let mut summary_order = std::mem::take(&mut state.summary_order);
+    summary_order.retain(|k| state.summary_cache.contains_key(k));
+    state.summary_order = summary_order;
 }
 
 pub fn invalidate_all() {
@@ -1070,9 +1057,9 @@ fn message_count_for(candidate: &Candidate, project_key: &str, directory: &str) 
     if let Some(hit) = cached_count(&ckey, project_key, &candidate.identity) {
         return hit;
     }
-    let before = stability_identity(&candidate.item.path);
+    let before = stability_identity(Path::new(&candidate.item.path));
     let count = count_messages(Path::new(&candidate.item.path));
-    let after = stability_identity(&candidate.item.path);
+    let after = stability_identity(Path::new(&candidate.item.path));
     if before.as_ref() == Some(&candidate.identity) && after.as_ref() == Some(&candidate.identity) {
         store_count(&ckey, project_key, &candidate.identity, count);
     }

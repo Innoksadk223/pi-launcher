@@ -433,7 +433,10 @@ fn monitor_loop(inner: Arc<Mutex<MonitorInner>>, snapshot: SnapshotFn, interval:
 }
 
 fn collect_sysinfo_snapshot() -> Vec<ProcRecord> {
-    let mut sys = System::new();
+    // sysinfo 0.40 起 System::new() 返回 Result（不支持的平台会 Err）
+    let Ok(mut sys) = System::new() else {
+        return Vec::new();
+    };
     sys.refresh_processes_specifics(
         ProcessesToUpdate::All,
         true,
