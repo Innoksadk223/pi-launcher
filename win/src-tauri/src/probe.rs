@@ -378,8 +378,11 @@ fn monitor_loop(inner: Arc<Mutex<MonitorInner>>, snapshot: SnapshotFn, interval:
                     if matched_ids.contains(req_id) {
                         continue;
                     }
-                    // 允许 1 秒时钟/粒度余量（对齐 Swift）
-                    if proc_rec.start_secs + 1 < req.since_secs {
+                    // 启动时间只到整秒（sysinfo 给的是截断后的秒），所以判据写成
+                    // 「进程不早于点击那一刻所在的整秒」：凡是点击之前启动的进程都一定被排除，
+                    // 而点击之后启动的进程 start_secs 不可能小于 since_secs，也不会被漏掉。
+                    // Mac 版用亚秒时间戳，那里容差是精确的 1 秒（ProcessProbe.swift:44）。
+                    if proc_rec.start_secs < req.since_secs {
                         continue;
                     }
                     if !req.targets.contains(&cwd_norm) {

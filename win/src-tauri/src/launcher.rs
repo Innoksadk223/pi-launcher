@@ -64,35 +64,30 @@ pub fn escape_wt_arg(arg: &str) -> String {
     arg.replace(';', r"\;")
 }
 
-/// 对 `cmd.exe /c "..."` 内使用的单个命令行 token 做引号/元字符保护：
-/// 1. 拒绝含 `\r` `\n` `\0` 的输入（cmd 无法单行携带换行）；
-/// 2. 外层包 `"..."`，内部的 `"` 写成 `""`；
-/// 3. 双引号外的 `%` 会被 cmd 当作环境变量展开，`^%` 在引号外是字面 `%`；但被包在 `"..."`
-///    里面时 `^` 本身成了字面字符，而 `%VAR%` 在引号里仍会被 cmd 展开！
-///    正确做法：若参数含 `%` 或 `!`（延迟扩展），先用 `"..."` 包住一般段，把每个 `%` 和 `!`
-///    拆出双引号外并写作 `^%` / `^!`（或对 cmd `/v:off` 下只需处理 `%`），或者更稳妥：
-///    只把含 `& ^ < > | ( ) ; , =` 和空格的普通串放进 `"..."`，遇到 `%` 时拆成
-///    `"前段"^%"后段"`，遇到 `"` 时在引号内写成 `""`（或引号外 `\"` 取决于 C 运行时，
-///    按 MSVC argv 解析规则，引号内 `""` 在部分程序与 `\"` 不同；最通用的 MSVC 规则是 `\"`，
-///    而 cmd.exe 把 `\"` 里的 `"` 也计入引号开闭计数——见下文精确编码）。
+/// 把一个 token 变成 cmd 下不会被拆开的写法。
 ///
-/// 实测验证：为了同时满足 **cmd.exe 的词法开关** 与 **子进程 MSVC CommandLineToArgvW**，
-/// 规则分两层：
-/// - `cmd.exe /d /c <raw_cmdline>`：只要命令开头或任意位置出现 `"..."`，cmd 会按最简单规则配对 `"`，
-///   在引号内屏蔽 `& | < > ( ) ^ ;`，**唯一仍会在双引号内展开的字符是 `%`（和延迟扩展时的 `!`）**。
-/// - `cmd.exe /d /v:off /c` 关掉 `!` 延迟扩展后，引号内唯一特殊字符只剩 `%` 和 `"`。
-///   - 遇到 `%`：闭掉引号 + `^%` + 重开引号（即 `"..."^%"..."`）。在 cmd 里，`^%` 不触发环境变量
-///     扩展，且在拼接时只输出一个 `%` 传给子进程，因为引号内/外衔接没有插空格！
-///   - 遇到 `"`（路径一般不含 `"`，Windows 文件名禁用 `"`，但测试和命令名可能出现）：
-///     按 MSVC argv 解析器，连续 `n` 个 `\` 后跟 `"` 需要写成 `2n+1` 个 `\` + `"`。在 cmd.exe 中，
-///     为了不破坏引号配对状态，引号外的 `\^"` 对 cmd 是字面 `\"`，进入 MSVC argv 就解成字面 `"`！
-/// - 最后整个传给 `wt.exe` 时，再对整串（或各个 argv）把 `;` 转义成 `\;`。
+/// 这条链有三层，每一层都会动引号，必须一起算：
 ///
-/// 这套规则对常见与极端字符（中文、空格、`'`、`&`、`^`、`;`、`%`、`!`）全部在 Windows cmd 下可逆还原。
+/// 1. **我们**：token 包进 `"..."`。引号内 `& | < > ( ) ^ ; , = @ ' 空格` 全是字面量，
+///    唯一还会展开的是 `%`（`/v:off` 之后 `!` 不再是特殊字符）。
+///    所以遇到 `%` 就闭引号、写 `^%`、再开引号：`"C:\100"^%"done"`。cmd 拼接时只输出一个 `%`。
+/// 2. **Windows Terminal**：它把各个位置参数用空格拼起来，**只对含空格的 token 再包一层 `"`**，
+///    而且不转义里面的 `"`（见 AppCommandlineArgs::_getNewTerminalArgs）。
+///    也就是说外层这层引号由它给，我们不能再自己包一层，否则会多出一对、把命令粘成一个程序名。
+/// 3. **cmd /c**：命令余下部分以 `"` 开头且引号多于两个时，剥掉最外层那一对。
+///    正好把第 2 层补的那对吃掉，回到我们第 1 层写好的样子。
+///
+/// 含 `"` 的 token 直接拒绝：Windows 文件名里不可能出现 `"`，真出现说明输入不是正常路径，
+/// 与其猜测怎么转义，不如明说传不过去（换行、空字符同理）。
 pub fn cmd_quote_arg(raw: &str) -> Result<String, LaunchError> {
     if raw.contains('\r') || raw.contains('\n') || raw.contains('\0') {
         return Err(LaunchError::InvalidArgument(
             "路径或参数包含换行符或空字符，Windows 命令行无法传递。".to_string(),
+        ));
+    }
+    if raw.contains('"') {
+        return Err(LaunchError::InvalidArgument(
+            "路径或参数包含双引号，Windows 命令行无法可靠传递。".to_string(),
         ));
     }
     if raw.is_empty() {
@@ -100,29 +95,18 @@ pub fn cmd_quote_arg(raw: &str) -> Result<String, LaunchError> {
     }
 
     let mut out = String::with_capacity(raw.len() + 8);
-    out.push('"');
     let mut backslashes = 0usize;
+    out.push('"');
     for ch in raw.chars() {
         match ch {
             '\\' => {
                 backslashes += 1;
                 out.push('\\');
             }
-            '"' => {
-                // 在当前引号段尾前输出额外 backslashes 凑够 2n，闭掉引号，输出 \^"，再重开引号
-                for _ in 0..backslashes {
-                    out.push('\\');
-                }
-                backslashes = 0;
-                out.push('"');
-                out.push_str(r"\^");
-                out.push('"');
-                out.push('"');
-            }
+            // 引号内仍会展开：闭引号 + ^% + 重开引号，cmd 拼接后仍是字面 %，且不留空格
             '%' => {
-                // `%` 不受前导反斜杠影响（只是普通字符），但会破坏 cmd 引号内的变量展开
-                backslashes = 0;
-                out.push_str(r#""^%""#);
+                out.push_str(&quote_prefix_backslashes(&mut backslashes));
+                out.push_str("\"^%\"");
             }
             _ => {
                 backslashes = 0;
@@ -130,12 +114,24 @@ pub fn cmd_quote_arg(raw: &str) -> Result<String, LaunchError> {
             }
         }
     }
-    // 末尾紧接闭引号前的反斜杠需要翻倍，避免把闭引号转义掉
-    for _ in 0..backslashes {
-        out.push('\\');
-    }
+    out.push_str(&quote_prefix_backslashes(&mut backslashes));
     out.push('"');
     Ok(out)
+}
+
+
+/// 反斜杠紧接着引号时，MSVC 的 argv 解析会把 `\"` 当成「字面引号」，引号配对随之错位。
+/// 所以每次要发一个「真正的引号」之前，先把前面的反斜杠数补成偶数。
+/// 返回需要补写的反斜杠（并清零计数）。
+fn quote_prefix_backslashes(backslashes: &mut usize) -> String {
+    let extra = if *backslashes % 2 == 1 {
+        *backslashes = 0;
+        "\\".to_string()
+    } else {
+        *backslashes = 0;
+        String::new()
+    };
+    extra
 }
 
 /// 生成传给 `wt.exe` 的完整参数列表（不含 `wt.exe` 自身）：
@@ -143,8 +139,8 @@ pub fn cmd_quote_arg(raw: &str) -> Result<String, LaunchError> {
 ///
 /// 为什么加 `new-tab`？显式写子命令可防止路径或命令以 `-` 开头时被 `wt` 解析成外层 flag；
 /// 加 `-w new` 保证每次都在新窗口开，行为对应 Mac 上 Terminal.app 的开新窗。
-/// `cmd /d /v:off /c "<inner>"`：`/d` 不跑 AutoRun，`/v:off` 关延迟扩展避免 `!` 被吞。
-/// 再套一层外引号给 `cmd /c "..."` 规则（cmd 在引号首尾同时剥除最外层引号并执行内层命令行）。
+/// `cmd /d /v:off /c <inner>`：`/d` 不跑 AutoRun，`/v:off` 关延迟扩展避免 `!` 被吞。
+/// `<inner>` 不再自带外层引号——那一对由 wt 补、由 cmd /c 剥，见 [`cmd_quote_arg`] 的三层说明。
 pub fn build_wt_args(
     project_path: &str,
     session_path: Option<&str>,
@@ -158,9 +154,9 @@ pub fn build_wt_args(
         }
         None => pi_quoted,
     };
-    // `cmd /c "<inner>"` 规则：首字符是 `"` 时，cmd 保留内部所有引号并仅剥掉最外一对（含尾引号）。
-    // 这样 inner_cmd 里的引号、`^%`、`&`、`'` 都会原样进到 inner_cmd，不会在第一层被误拆。
-    let cmd_payload = format!("\"{inner_cmd}\"");
+    // 不能再自己包一层引号：wt 会替含空格的 token 补一对，cmd /c 再剥掉那一对，
+    // 三层刚好抵消、回到 inner_cmd 本身。多包一层会变成两组引号互不配对。
+    let cmd_payload = inner_cmd;
 
     Ok(vec![
         "-w".to_string(),
@@ -219,80 +215,269 @@ pub fn unescape_wt_arg(raw: &str) -> String {
 mod tests {
     use super::*;
 
-    /// 模拟 cmd.exe 对单个命令行参数的解析并还原子进程收到的字符串（覆盖 %、^%、"、""、空格、&、!）。
-    /// 这是针对 cmd /d /v:off 的精确词法模拟；真正 cmd.exe 实测也会在 CI Windows 上再跑。
-    fn simulate_cmd_single_arg(quoted: &str) -> String {
+    // ── 整条链的模拟器 ───────────────────────────────────────────
+    // 只测「单个 cmd 参数」会漏掉中间两层：wt 会重新拼命令行并补引号，cmd /c 又会剥一层。
+    // 这里把三层都写出来，断言最后一层交到子进程手里的 argv。
+
+    /// 第 0 层：`std::process::Command` 在 Windows 上把 argv 拼成命令行。
+    /// 与 Rust 标准库同样遵循 MSVC 规则：含空白或引号才加引号，内部 `"` 写 `\"`，
+    /// 引号前的反斜杠数翻倍。
+    fn encode_create_process(argv: &[String]) -> String {
         let mut out = String::new();
-        let chars: Vec<char> = quoted.chars().collect();
-        let mut i = 0;
+        for (i, arg) in argv.iter().enumerate() {
+            if i > 0 {
+                out.push(' ');
+            }
+            if arg.is_empty() {
+                out.push_str("\"\"");
+                continue;
+            }
+            if !arg.chars().any(|c| c == ' ' || c == '\t' || c == '"') {
+                out.push_str(arg);
+                continue;
+            }
+            out.push('"');
+            let mut backslashes = 0usize;
+            for c in arg.chars() {
+                if c == '\\' {
+                    backslashes += 1;
+                    out.push('\\');
+                } else if c == '"' {
+                    out.push_str(&"\\".repeat(backslashes + 1));
+                    out.push('"');
+                    backslashes = 0;
+                } else {
+                    backslashes = 0;
+                    out.push(c);
+                }
+            }
+            out.push_str(&"\\".repeat(backslashes));
+            out.push('"');
+        }
+        out
+    }
+
+    /// `CommandLineToArgvW`：进程（这里是 wt.exe）看到的 argv
+    fn argv_from_commandline(line: &str) -> Vec<String> {
+        let chars: Vec<char> = line.chars().collect();
+        let mut out: Vec<String> = Vec::new();
+        let mut cur = String::new();
         let mut in_quotes = false;
+        let mut have = false;
+        let mut i = 0;
+        while i < chars.len() {
+            let c = chars[i];
+            if c == '\\' {
+                let mut n = 0;
+                while i < chars.len() && chars[i] == '\\' {
+                    n += 1;
+                    i += 1;
+                }
+                if i < chars.len() && chars[i] == '"' {
+                    cur.push_str(&"\\".repeat(n / 2));
+                    if n % 2 == 1 {
+                        cur.push('"');
+                        have = true;
+                        i += 1;
+                    }
+                } else {
+                    cur.push_str(&"\\".repeat(n));
+                    have = true;
+                }
+                continue;
+            }
+            if c == '"' {
+                in_quotes = !in_quotes;
+                have = true;
+                i += 1;
+                continue;
+            }
+            if !in_quotes && (c == ' ' || c == '\t') {
+                if have {
+                    out.push(std::mem::take(&mut cur));
+                    have = false;
+                }
+                i += 1;
+                continue;
+            }
+            cur.push(c);
+            have = true;
+            i += 1;
+        }
+        if have {
+            out.push(cur);
+        }
+        out
+    }
+
+    /// 第 2 层：Windows Terminal 把位置参数拼成 profile 命令行。
+    /// 只有含空格的 token 会被再包一层 `"`，内部引号不转义（AppCommandlineArgs.cpp）。
+    fn wt_join(positionals: &[String]) -> String {
+        let mut out = String::new();
+        for (i, a) in positionals.iter().enumerate() {
+            if i > 0 {
+                out.push(' ');
+            }
+            if a.contains(' ') {
+                out.push('"');
+                out.push_str(a);
+                out.push('"');
+            } else {
+                out.push_str(a);
+            }
+        }
+        out
+    }
+
+    /// 第 3 层：`cmd /c` 对余下命令行的引号处理（Windows 文档里 /C 的那两条规则）。
+    /// 这里 `exe_exists` 恒为 false：测试环境里没有真的 pi 可执行文件，
+    /// 而规则 1 只在「两个引号之间是已存在的可执行文件」时才生效。
+    fn cmd_c_slice(remainder: &str) -> String {
+        let quote_count = remainder.chars().filter(|&c| c == '"').count();
+        if !remainder.starts_with('"') {
+            return remainder.to_string();
+        }
+        if quote_count == 2 {
+            // 规则 1：仅当两个引号之间是已存在的可执行文件时保留引号
+            let inner: String = remainder.trim_matches('"').to_string();
+            let has_space = inner.chars().any(|c| c.is_whitespace());
+            let special = inner.chars().any(|c| "&<>()@^|".contains(c));
+            let _ = (has_space, special); // 测试里 exe 不存在 → 落到规则 2
+        }
+        // 规则 2：剥掉开头与结尾各一个引号
+        let mut chars: Vec<char> = remainder.chars().collect();
+        if chars.first() == Some(&'"') {
+            chars.remove(0);
+        }
+        if chars.last() == Some(&'"') {
+            chars.pop();
+        }
+        chars.into_iter().collect()
+    }
+
+    /// `^%` 换出来的字面百分号用的占位符，展开完再换回去
+    const PERCENT: char = '\u{1}';
+
+    /// cmd 的词法：引号内一切字面；引号外 `^` 吞掉下一个字符，
+    /// 被 `^` 保护的 `%` 不会被当成变量引用（用占位符带出去）。
+    fn cmd_lex(line: &str) -> String {
+        let chars: Vec<char> = line.chars().collect();
+        let mut out = String::new();
+        let mut in_quotes = false;
+        let mut i = 0;
         while i < chars.len() {
             let c = chars[i];
             if c == '"' {
                 in_quotes = !in_quotes;
+                out.push(c);
                 i += 1;
                 continue;
             }
             if !in_quotes && c == '^' && i + 1 < chars.len() {
-                out.push(chars[i + 1]);
+                let next = chars[i + 1];
+                out.push(if next == '%' { PERCENT } else { next });
                 i += 2;
                 continue;
             }
             out.push(c);
             i += 1;
         }
-        // 去掉用于 MSVC argv 保护的成对反斜杠简化验证：重点核对语义字符不被丢失或展开
         out
     }
 
+    /// 模拟 `%NAME%` 展开：只认真实存在的环境变量名，其余 `%` 保持字面；
+    /// 展开完成后再把 `^%` 带出来的占位符换回字面百分号。
+    fn expand_percent(line: &str, env: &[(&str, &str)]) -> String {
+        let mut out = line.to_string();
+        for (name, value) in env {
+            out = out.replace(&format!("%{name}%"), value);
+        }
+        out.replace(PERCENT, "%")
+    }
+
+    /// 走完整条链，返回子进程真正拿到的 argv
+    fn child_argv(args: &[String], env: &[(&str, &str)]) -> Vec<String> {
+        let wire = encode_create_process(args);
+        let wt_argv = argv_from_commandline(&wire);
+        assert_eq!(wt_argv, args.to_vec(), "wt 收到的 argv 被打乱了：{wire}");
+
+        // wt 的 Commandline::AddArg 会把 `\;` 还原成 `;`
+        let unescaped: Vec<String> = wt_argv[5..]
+            .iter()
+            .map(|a| a.replace("\\;", ";"))
+            .collect();
+        // `-w new new-tab -d <dir>` 之后的才是 profile 命令行
+        let positionals = &unescaped[..];
+        assert_eq!(positionals[0], "cmd.exe");
+        let joined = wt_join(positionals);
+        let after_c = joined.split_once("/c ").expect("没有 /c").1.to_string();
+        let sliced = cmd_c_slice(&after_c);
+        let lexed = cmd_lex(&sliced);
+        let expanded = expand_percent(&lexed, env);
+        argv_from_commandline(&expanded)
+    }
+
     #[test]
-    fn wt_and_cmd_quoting_preserves_tricky_characters() {
-        let cases = [
-            r"C:\Users\张三\项目 'A'\sub",
-            r"D:\work & test\a;b\100%done!now\dir",
-            r"C:\path with ^caret & pipe|dir",
-            r"C:\Users\demo\会话 'B' ; v2 & %TEMP% !x!.jsonl",
+    fn full_chain_reaches_pi_with_exact_argv() {
+        let cases: Vec<(&str, Option<&str>, &str)> = vec![
+            (r"C:\Users\demo\proj", None, "pi"),
+            (r"C:\Users\demo\proj", Some(r"C:\Users\demo\.pi\agent\sessions\--C--Users-demo-proj--\a.jsonl"), "pi"),
+            (r"C:\Users\张三\项目 'A'\sub", Some(r"C:\Users\张三\.pi\a b.jsonl"), "pi"),
+            (r"D:\work & test\a;b\dir", Some(r"D:\work & test\s 'x' ; v2.jsonl"), "pi"),
+            (r"C:\path with ^caret & pipe|dir", Some(r"C:\caret^path\s.jsonl"), "pi"),
+            (r"C:\100%done\dir", Some(r"C:\100%done\s;1.jsonl"), "pi"),
+            (r"C:\Users\John Doe\proj", Some(r"C:\Users\John Doe\.pi\s.jsonl"), r"C:\Program Files\Pi\pi.cmd"),
+            (r"C:\Users\demo\proj", Some(r"C:\Users\demo\s!x!.jsonl"), "pi"),
+            // 反斜杠紧挨着 `%`：不补偶数个反斜杠的话 `\"` 会被当成字面引号，整个 token 散架
+            (r"C:\proj\%TEMP%x", Some(r"C:\users\demo\%PATH%\s.jsonl"), "pi"),
+            // 结尾反斜杠（盘符根、以 `\` 收尾的目录）
+            (r"C:\", Some("C:\\s\\tail\\"), "pi"),
         ];
 
-        for raw in cases {
-            let q = cmd_quote_arg(raw).unwrap();
-            let round = simulate_cmd_single_arg(&q);
-            assert_eq!(round, raw, "roundtrip failed for {raw} -> {q}");
-
-            let wt_escaped = escape_wt_arg(&q);
-            assert_eq!(unescape_wt_arg(&wt_escaped), q);
+        for (project, session, pi) in cases {
+            let args = build_wt_args(project, session, pi).unwrap();
+            let got = child_argv(&args, &[]);
+            let mut want: Vec<String> = vec![pi.to_string()];
+            if let Some(s) = session {
+                want.push("--session".to_string());
+                want.push(s.to_string());
+            }
+            assert_eq!(got, want, "project={project} session={session:?} pi={pi}");
         }
+    }
 
-        // 检查 build_wt_args 的分号转义：参数里不能留有未转义的 `;`
-        let args = build_wt_args(
-            r"C:\proj;semi\中文 'A' & %PATH% !VAR!",
-            Some(r"C:\sessions;1\s 'x' & %OS%.jsonl"),
-            "pi",
-        )
-        .unwrap();
-        assert_eq!(args[0..4], ["-w", "new", "new-tab", "-d"]);
-        assert_eq!(args[4], r"C:\proj\;semi\中文 'A' & %PATH% !VAR!");
-        assert_eq!(args[5], "cmd.exe");
-        assert_eq!(args[6], "/d");
-        assert_eq!(args[7], "/v:off");
-        assert_eq!(args[8], "/c");
-        // 检查 wt 命令串里的每个分号都带反斜杠前缀
-        let cmd_str = &args[9];
-        for (idx, _) in cmd_str.match_indices(';') {
-            assert!(
-                idx > 0 && cmd_str.as_bytes()[idx - 1] == b'\\',
-                "unescaped semicolon in {cmd_str}"
-            );
-        }
-        // 剥掉 wt 转义后仍含 --session
-        let after_wt = unescape_wt_arg(cmd_str);
-        assert!(after_wt.contains("--session"));
+    #[test]
+    fn environment_variables_in_paths_are_not_expanded() {
+        // 名字和环境变量同形的路径必须原样落地，不能被 cmd 当成变量展开
+        let project = r"C:\proj\%TEMP%x";
+        let session = r"C:\users\demo\%PATH%\s.jsonl";
+        let args = build_wt_args(project, Some(session), "pi").unwrap();
+        let got = child_argv(&args, &[("TEMP", "ZZZ"), ("PATH", "QQQ")]);
+        assert_eq!(
+            got,
+            vec![
+                "pi".to_string(),
+                "--session".to_string(),
+                r"C:\users\demo\%PATH%\s.jsonl".to_string()
+            ],
+            "路径里的 %PATH% 被展开了"
+        );
 
-        // 不含 session 时不能出现 --session
-        let plain = build_wt_args(r"C:\proj", None, "pi").unwrap();
-        assert!(!plain[9].contains("--session"));
+        // 对照：没被 `^` 保护的同一个串确实会被展开，证明这条断言不是空转
+        assert_eq!(
+            expand_percent(r"C:\users\demo\%PATH%\s.jsonl", &[("PATH", "QQQ")]),
+            r"C:\users\demo\QQQ\s.jsonl"
+        );
 
-        // 含换行符必须明确拒绝
+        // 项目目录走 -d，不进 cmd，但分号仍要转义给 wt
+        assert!(args[4].contains(r"\;") || !args[4].contains(';'));
+    }
+
+    #[test]
+    fn rejects_unpassable_input() {
         assert!(cmd_quote_arg("bad\npath").is_err());
+        assert!(cmd_quote_arg("bad\rpath").is_err());
+        assert!(cmd_quote_arg("bad\"path").is_err());
+        assert!(cmd_quote_arg("").is_ok());
     }
 }
