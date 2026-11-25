@@ -103,8 +103,29 @@ pub fn cmd_quote_arg(raw: &str) -> Result<String, LaunchError> {
             "路径或参数包含双引号，Windows 命令行无法可靠传递。".to_string(),
         ));
     }
+    // 制表符也会让 wt 与 cmd 对「要不要加引号」判断不一致，索性不收
+    if raw.contains('\t') {
+        return Err(LaunchError::InvalidArgument(
+            "路径或参数包含制表符，Windows 命令行无法可靠传递。".to_string(),
+        ));
+    }
     if raw.is_empty() {
         return Ok("\"\"".to_string());
+    }
+
+    // 只有含空格才加引号：wt 只在 token 含空格时才补外层那一对，
+    // 我们加不加引号必须与它同一判据，否则 cmd /c 会剥掉我们这对，
+    // `^%` 就会落进引号里变成本字面 `^`。
+    if !raw.contains(' ') {
+        // 裸写：引号外的元字符逐个用 ^ 转义，绕开所有引号计数
+        let mut out = String::with_capacity(raw.len() + 4);
+        for ch in raw.chars() {
+            if matches!(ch, '%' | '&' | '|' | '<' | '>' | '^' | '(' | ')' | '@' | ',' | ';' | '=') {
+                out.push('^');
+            }
+            out.push(ch);
+        }
+        return Ok(out);
     }
 
     let mut out = String::with_capacity(raw.len() + 8);
@@ -449,6 +470,10 @@ mod tests {
             (r"C:\proj\%TEMP%x", Some(r"C:\users\demo\%PATH%\s.jsonl"), "pi"),
             // 结尾反斜杠（盘符根、以 `\` 收尾的目录）
             (r"C:\", Some("C:\\s\\tail\\"), "pi"),
+            // 无 session、pi 绝对路径含 % 且不含空格：wt 不补外层引号，只能走裸写 + ^ 转义
+            (r"C:\proj", None, r"C:\100%bin\pi.cmd"),
+            (r"C:\proj", None, r"C:\a&b\pi.cmd"),
+            (r"C:\proj", None, r"C:\a&b dir\pi.cmd"),
         ];
 
         for (project, session, pi) in cases {
@@ -495,6 +520,11 @@ mod tests {
         assert!(cmd_quote_arg("bad\npath").is_err());
         assert!(cmd_quote_arg("bad\rpath").is_err());
         assert!(cmd_quote_arg("bad\"path").is_err());
+        assert!(cmd_quote_arg("bad\tpath").is_err());
         assert!(cmd_quote_arg("").is_ok());
+        // 不含空格时走裸写：元字符逐个 ^ 转义，不产生引号
+        assert_eq!(cmd_quote_arg(r"C:\a&b\c").unwrap(), r"C:\a^&b\c");
+        assert_eq!(cmd_quote_arg(r"C:\100%x").unwrap(), r"C:\100^%x");
+        assert_eq!(cmd_quote_arg("pi").unwrap(), "pi");
     }
 }
