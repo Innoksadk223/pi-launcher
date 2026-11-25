@@ -232,8 +232,7 @@ pi-project-launcher/
 │       ├── src/history.rs   会话索引（编码规则与 Mac 版一致）
 │       ├── src/terminal.rs  只登记 Windows Terminal
 │       ├── src/launcher.rs  wt.exe 命令行构造（引号三层）
-│       ├── src/probe.rs     进程探测（cwd / 身份 / 启动时间）
-│       └── src/lib.rs       模块导出（测试用）
+│       └── src/probe.rs     进程探测（cwd / 身份 / 启动时间）
 ├── .github/workflows/      两个平台的构建与发布
 └── tools/                  验证工具
 ```
