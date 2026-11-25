@@ -1,0 +1,38 @@
+- main [ref=e2]:
+  - generic [ref=e3]:
+    - heading "PI 项目启动器" [level=1] [ref=e4]
+    - button "终端" [ref=e5] [cursor=pointer]
+    - switch "切换白天 / 夜晚" [ref=e11] [cursor=pointer]:
+      - generic [ref=e13]: 昼
+      - generic [ref=e14]: 夜
+  - generic [ref=e16]:
+    - generic [ref=e17]:
+      - generic [ref=e20]: 搜索项目
+      - textbox "搜索项目" [ref=e21]:
+        - /placeholder: 输入项目名或路径以筛选…
+    - region "项目列表" [ref=e22]:
+      - generic [ref=e23]:
+        - heading "还没有项目" [level=2] [ref=e27]
+        - paragraph [ref=e28]: 选一个文件夹，就在 Ghostty 新窗口里用这个目录启动 PI。之后它会一直在这里等着。
+        - list [ref=e29]:
+          - listitem [ref=e30]:
+            - generic [ref=e31]: "1"
+            - generic [ref=e32]: 点列表末尾的「选择文件夹并打开」，选一个项目目录
+          - listitem [ref=e33]:
+            - generic [ref=e34]: "2"
+            - generic [ref=e35]: Ghostty 里直接就是 PI，不用再 cd
+          - listitem [ref=e36]:
+            - generic [ref=e37]: "3"
+            - generic [ref=e38]: 关掉窗口就退出；下次从 Dock 再打开
+        - paragraph [ref=e39]:
+          - generic [ref=e40]: ↑↓ 选择
+          - generic [ref=e41]: ↵ 开新会话
+          - generic [ref=e42]: ⌘↵ 继续上次
+          - generic [ref=e43]: ⌘F 搜索
+      - button "选择文件夹并打开" [ref=e45] [cursor=pointer]
+  - generic [ref=e49]:
+    - status
+    - paragraph [ref=e50]:
+      - generic [ref=e51]: ↑↓ 选择
+      - generic [ref=e52]: ↵ 新会话
+      - generic [ref=e53]: ⌘↵ 继续上次

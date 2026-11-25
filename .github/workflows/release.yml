@@ -101,7 +101,9 @@ jobs:
 
       - name: 确认 dmg 里是 arm64
         run: |
-          lipo -archs "PI 项目启动器.app/Contents/MacOS/PI 项目启动器"
+          archs=$(lipo -archs "PI 项目启动器.app/Contents/MacOS/PI 项目启动器")
+          echo "archs: $archs"
+          [ "$archs" = "arm64" ] || { echo "期望 arm64，实际是 $archs"; exit 1; }
 
       - uses: actions/upload-artifact@v4
         with:

@@ -300,9 +300,11 @@
   function shortenPath(p) {
     var home = trimTrailing(state.home || "");
     var s = trimTrailing(p);
-    if (home && s.toLowerCase().indexOf(home.toLowerCase()) === 0) {
-      return "~" + s.slice(home.length);
-    }
+    // 只有 Windows 的路径不分大小写；Mac 卷可能分大小写，照原样逐字比较
+    var hit = IS_WIN
+      ? s.toLowerCase().indexOf(home.toLowerCase()) === 0
+      : s.indexOf(home) === 0;
+    if (home && hit) return "~" + s.slice(home.length);
     return s;
   }
 
