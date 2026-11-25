@@ -73,6 +73,46 @@ R<Tab>/Users/you/projects/另一个项目
 
 `terminal.txt` 只一行终端 id。文件不在、写了个不存在的 id、或那个终端已经卸载，都回落到第一个能用的（先 Ghostty，再系统 Terminal），并在底栏说一句。
 
+## Windows 版
+
+Windows 上跑的是同一个界面，外面换了一个 Tauri 2 外壳（Rust + 系统自带 WebView2）。交付物是**单文件便携 exe**，双击就能用，不需要安装。
+
+```bash
+# 从源码构建（需要 Rust 与 Node）
+cd win
+npm install -g @tauri-apps/cli@2
+npx tauri build --no-bundle      # 产出 win/src-tauri/target/release/pi-launcher.exe
+```
+
+推送到 `main` 时 GitHub Actions 会同时出两个包；打 `v*` 标签时挂到 Release：
+
+| 平台 | 产物 | 说明 |
+|---|---|---|
+| Windows | `pi-launcher-<版本>-windows-x64.exe` | 单文件，免安装 |
+| macOS | `pi-launcher-<版本>-macos-arm64.dmg` | 拖进「应用程序」 |
+
+第一次双击 exe 会弹 SmartScreen（没有代码签名），点「更多信息 → 仍要运行」。
+
+**前提**：本机要有 `pi`（能在命令提示符里直接敲 `pi`），以及 Windows Terminal。系统还要有 WebView2——Windows 11 和更新过的 Windows 10 都自带。
+
+数据放在 `%APPDATA%\PI Launcher\`，和 Mac 版同构：
+
+```
+%APPDATA%\PI Launcher\
+├── projects.txt     项目列表（F/R + 制表符 + 绝对路径）
+└── terminal.txt     选中的终端 id
+```
+
+和 Mac 版的差别，只有这几处：
+
+- **终端**：只认 Windows Terminal（`wt.exe`）。没装时底栏直接说一句「没找到 Windows Terminal」，不回落别的终端。
+- **继续会话不切已开窗口**：Mac 上「继续」会先找 Ghostty 里已经开着的那个窗口并切过去；Windows 一律开新窗口。
+- **窗口键自绘**：无边框窗口，标题栏右侧的「— □ ×」是画在页面里的；标题栏可拖动，双击最大化。
+- **快捷键**：`⌘↵` → `Ctrl+↵`，`⌘F` → `Ctrl+F`，`⌘W` → `Ctrl+W`；`ESC` 不变。
+- **字体**：项目名用系统自带的宋体（SimSun），正文 Microsoft YaHei UI，等宽 Cascadia Mono / Consolas。
+
+启动链路是 `wt.exe -w new new-tab -d <项目> cmd /d /v:off /c <pi 命令>`。三层都会改引号，改这段之前先看 `win/src-tauri/src/launcher.rs` 里 `cmd_quote_arg` 的注释——外面那对引号是 Windows Terminal 补的、cmd 剥的，自己再包一层会把整条命令粘成一个程序名。
+
 ## 视觉
 
 整套界面是**纸卡**：暖白纸、墨黑字、宋体项目名、等宽日期。共享材质包（`ui/tokens.css` + `ui/glass.css`）保持与风格包逐字节一致，只借它两样东西——整窗那一层磨砂板，和表面的颗粒；其余组件全部在 `ui/app.css` 里重写。
@@ -138,9 +178,15 @@ R<Tab>/Users/you/projects/另一个项目
 
 ## 首次运行可能需要的授权
 
+**macOS**
+
 - 系统可能弹「允许“PI 项目启动器”控制“Ghostty”（或 Terminal）」：需要点允许，否则无法开终端窗口。
 - 若之前拒绝过，到「系统设置 → 隐私与安全性 → 自动化」重新勾选。
 - 若 Ghostty 配置里写了 `macos-applescript = false`，需改回 `true`。
+
+**Windows**
+
+- 只有一条：第一次双击 exe 时 SmartScreen 拦一下，点「更多信息 → 仍要运行」。没有别的授权要开。
 
 ## 说明与边界
 
@@ -179,6 +225,16 @@ pi-project-launcher/
 │   ├── glass.css           材质层：板 / 槽 / 凸 / 按钮 / 开关（风格包 v3.0）
 │   ├── app.css             启动器版式与 8 种卡片状态
 │   └── app.js              渲染与交互逻辑
+├── win/                    Windows 版（Tauri 2 外壳，共用 ui/）
+│   └── src-tauri/
+│       ├── src/main.rs      窗口、桥接、请求代际与生命周期门
+│       ├── src/store.rs     项目列表读写（%APPDATA%\PI Launcher）
+│       ├── src/history.rs   会话索引（编码规则与 Mac 版一致）
+│       ├── src/terminal.rs  只登记 Windows Terminal
+│       ├── src/launcher.rs  wt.exe 命令行构造（引号三层）
+│       ├── src/probe.rs     进程探测（cwd / 身份 / 启动时间）
+│       └── src/lib.rs       模块导出（测试用）
+├── .github/workflows/      两个平台的构建与发布
 └── tools/                  验证工具
 ```
 
