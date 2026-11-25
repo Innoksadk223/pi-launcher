@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>PI 项目启动器</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="glass.css">
+<link rel="stylesheet" href="app.css">
+<script>
+/* 主题要在首帧前定下来，否则暗色下会先闪一帧白。
+   首次启动读系统外观，之后一律用上次手动选的。 */
+(function () {
+  var saved = null;
+  try { saved = localStorage.getItem('pi.launcher.theme'); } catch (e) {}
+  var dark = saved ? saved === 'night'
+    : window.matchMedia('(prefers-color-scheme: dark)').matches;
+  document.documentElement.dataset.theme = dark ? 'night' : 'day';
+})();
+</script>
+</head>
+<body class="lg-theme" data-feel="crafted">
+
+<!-- ══ 图标 sprite（24 网格，line 风格）══ -->
+<svg class="sprite" aria-hidden="true" focusable="false">
+  <symbol id="i-folder" viewBox="0 0 24 24">
+    <path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2.5h7A1.5 1.5 0 0 1 19 10v7.5A1.5 1.5 0 0 1 17.5 19h-13A1.5 1.5 0 0 1 3 17.5z"/>
+  </symbol>
+  <symbol id="i-star" viewBox="0 0 24 24">
+    <path d="M12 3.6l2.5 5.1 5.6.8-4.1 4 1 5.6-5-2.6-5 2.6 1-5.6-4.1-4 5.6-.8z"/>
+  </symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24">
+    <circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 1.8"/>
+  </symbol>
+  <symbol id="i-history" viewBox="0 0 24 24">
+    <path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1M3.5 4.5V10H9"/><path d="M12 8v4.2l2.8 1.7"/>
+  </symbol>
+  <symbol id="i-collapse-right" viewBox="0 0 24 24">
+    <rect x="3" y="4" width="18" height="16" rx="2"/>
+    <path d="M14 4v16M9 9.5l3 2.5-3 2.5"/>
+  </symbol>
+  <symbol id="i-chevron-right" viewBox="0 0 24 24">
+    <path d="m9.5 6.5 5.5 5.5-5.5 5.5"/>
+  </symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24">
+    <path d="M12 5v14M5 12h14"/>
+  </symbol>
+  <symbol id="i-search" viewBox="0 0 24 24">
+    <circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 20 20"/>
+  </symbol>
+  <symbol id="i-terminal" viewBox="0 0 24 24">
+    <rect x="3" y="4.5" width="18" height="15" rx="2.5"/>
+    <path d="M7 10l2.4 2.2L7 14.4M12.5 14.5h4.5"/>
+  </symbol>
+  <symbol id="i-empty" viewBox="0 0 24 24">
+    <path d="M3.5 7.5h17v11h-17z"/><path d="M3.5 11h17"/><path d="M9 4h6"/>
+  </symbol>
+  <symbol id="i-warn" viewBox="0 0 24 24">
+    <path d="M12 3.8 21 20H3z"/><path d="M12 9.5v4.5M12 17h.01"/>
+  </symbol>
+  <symbol id="i-close" viewBox="0 0 24 24">
+    <path d="m7 7 10 10M17 7 7 17"/>
+  </symbol>
+  <symbol id="i-caret" viewBox="0 0 24 24">
+    <path d="m7.5 10 4.5 4.5 4.5-4.5"/>
+  </symbol>
+  <symbol id="i-win-min" viewBox="0 0 24 24">
+    <path d="M6 12.5h12"/>
+  </symbol>
+  <symbol id="i-win-max" viewBox="0 0 24 24">
+    <rect x="6.5" y="6.5" width="11" height="11" rx="1"/>
+  </symbol>
+</svg>
+
+<main class="shell lg-slab" id="shell">
+  <div class="canvas" aria-hidden="true"></div>
+
+  <header class="bar">
+    <h1 class="bar__title">PI 项目启动器</h1>
+    <button class="term" id="term" type="button" aria-haspopup="menu" aria-expanded="false"
+            title="选择用哪个终端打开">
+      <svg class="term__ico icon" aria-hidden="true"><use href="#i-terminal"/></svg>
+      <span class="term__name" id="term-name">终端</span>
+      <svg class="term__caret icon" aria-hidden="true"><use href="#i-caret"/></svg>
+    </button>
+    <button class="switch" id="theme" type="button" role="switch"
+            aria-checked="false" aria-label="切换白天 / 夜晚" title="白天 / 夜晚">
+      <span class="switch__thumb" aria-hidden="true"></span>
+      <span class="switch__opt switch__opt--day">昼</span>
+      <span class="switch__opt switch__opt--night">夜</span>
+    </button>
+    <!-- Windows 专用：无边框窗口要自己画最小化 / 最大化 / 关闭；Mac 下不显示 -->
+    <div class="win-controls" role="group" aria-label="窗口控制">
+      <button class="win-btn" id="win-min" type="button" title="最小化" aria-label="最小化">
+        <svg class="icon" aria-hidden="true"><use href="#i-win-min"/></svg>
+      </button>
+      <button class="win-btn" id="win-max" type="button" title="最大化 / 还原" aria-label="最大化或还原">
+        <svg class="icon" aria-hidden="true"><use href="#i-win-max"/></svg>
+      </button>
+      <button class="win-btn win-btn--close" id="win-close" type="button" title="关闭" aria-label="关闭">
+        <svg class="icon" aria-hidden="true"><use href="#i-close"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <div class="term__menu" id="term-menu" role="menu" aria-label="选择终端" hidden></div>
+
+  <!-- 工作区：平时单栏全宽；点「N 个旧会话」后变成左右两个独立纸盒 -->
+  <div class="workspace" id="workspace">
+
+    <div class="pane pane--projects" id="pane-projects">
+      <div class="find">
+        <svg class="find__icon icon" aria-hidden="true"><use href="#i-search"/></svg>
+        <label class="sr" for="q">搜索项目</label>
+        <input class="find__input" id="q" type="text" autocomplete="off" spellcheck="false"
+               placeholder="输入项目名或路径以筛选…">
+        <button class="find__clear" id="clear" type="button" hidden>清除 <kbd>ESC</kbd></button>
+      </div>
+
+      <section class="stack" id="stack" tabindex="-1" aria-label="项目列表"></section>
+    </div>
+
+    <aside class="pane pane--history" id="history" aria-label="历史会话" hidden>
+      <header class="history__head">
+        <div class="history__title-wrap">
+          <div class="history__title-row">
+            <h2 class="history__title" id="htitle"></h2>
+            <span class="history__count" id="hcount"></span>
+          </div>
+          <p class="history__path" id="hpath"></p>
+        </div>
+        <div class="history__actions">
+          <button class="hbtn hbtn--new" id="hnew" type="button" title="在此项目新建会话">
+            <svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>
+            <span>开新会话</span>
+          </button>
+          <button class="hbtn hbtn--close" id="hback" type="button" title="收起历史面板 (ESC)">
+            <svg class="icon" aria-hidden="true"><use href="#i-collapse-right"/></svg>
+            <span>收起</span>
+            <kbd>ESC</kbd>
+          </button>
+        </div>
+      </header>
+
+      <div class="history__find">
+        <svg class="find__icon icon" aria-hidden="true"><use href="#i-search"/></svg>
+        <label class="sr" for="hq">筛选会话</label>
+        <input class="find__input" id="hq" type="text" autocomplete="off" spellcheck="false"
+               placeholder="筛选此项目的会话标题…">
+        <button class="find__clear" id="hclear" type="button" hidden>清除</button>
+      </div>
+
+      <div class="history__list" id="hlist" tabindex="-1"></div>
+    </aside>
+
+  </div>
+
+  <footer class="foot">
+    <p class="foot__status" id="status" role="status"></p>
+    <p class="foot__keys" id="keys-projects">
+      <span><kbd>↑</kbd><kbd>↓</kbd> 选择</span>
+      <span><kbd>↵</kbd> 新会话</span>
+      <span><kbd data-mod="↵">⌘↵</kbd> 继续上次</span>
+    </p>
+    <p class="foot__keys" id="keys-split" hidden>
+      <span><kbd>⇥</kbd> 切换左右栏</span>
+      <span><kbd>↑</kbd><kbd>↓</kbd> 选会话</span>
+      <span><kbd>↵</kbd> 恢复会话</span>
+      <span><kbd>ESC</kbd> 收起右栏</span>
+    </p>
+  </footer>
+
+  <div class="toast" id="toast" role="alert" hidden></div>
+</main>
+
+<!-- 纸卡：上行名字 / 日期 / 工具，下行路径 + 旧会话胶囊，两行物理分槽不重叠 -->
+<template id="tpl-card">
+  <article class="cell">
+    <!-- 纸面是普通容器：胶囊必须能和路径同处第二行排版，不能被拆出去绝对定位 -->
+    <div class="card">
+      <span class="card__top">
+        <svg class="card__ico icon" aria-hidden="true"><use href="#i-folder"/></svg>
+        <span class="card__idx" aria-hidden="true"></span>
+        <span class="card__name"></span>
+        <span class="card__lead" aria-hidden="true"></span>
+        <span class="card__time"></span>
+      </span>
+      <span class="card__sub">
+        <span class="card__path"></span>
+        <button class="cell__sessions" type="button">
+          <svg class="icon cell__sessions-ico" aria-hidden="true"><use href="#i-history"/></svg>
+          <span class="cell__sessions-label"></span>
+          <span class="cell__sessions-short"></span>
+          <svg class="icon cell__sessions-arrow" aria-hidden="true"><use href="#i-chevron-right"/></svg>
+        </button>
+      </span>
+    </div>
+    <!-- 铺满纸面的透明按钮：整张卡可点开新会话，胶囊与工具在它之上 -->
+    <button class="card-open" type="button"></button>
+    <div class="cell__tools">
+      <button class="tool tool--fav" type="button">
+        <svg class="icon" aria-hidden="true"><use href="#i-star"/></svg>
+      </button>
+      <button class="tool tool--remove" type="button" title="从最近项目里移除">
+        <svg class="icon" aria-hidden="true"><use href="#i-close"/></svg>
+      </button>
+    </div>
+  </article>
+</template>
+
+<template id="tpl-add">
+  <button class="cell--add" type="button">
+    <svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>
+    <span>选择文件夹并打开</span>
+  </button>
+</template>
+
+<template id="tpl-session">
+  <button class="srow" type="button">
+    <span class="srow__body">
+      <span class="srow__title"></span>
+      <span class="srow__meta">
+        <span class="srow__count"></span>
+        <span class="srow__time"></span>
+      </span>
+    </span>
+  </button>
+</template>
+
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,280 @@
+/* 磨砂亚克力厚板 v3.0 · canonical components · requires tokens.css
+ *
+ * 渐变描边的做法：元素自身的 background 画填充，::before 用 border 区 +
+ * mask 合成出「只有 1px 边、且颜色沿 150° 渐变」的描边层。
+ * 直接用 border-color 只能是单一颜色，做不出参考图里那道会呼吸的白边。
+ *
+ * v3.0 的拟物三层（板 / 槽 / 凸）：
+ *   .lg-slab   整窗那块板：顶沿内高光 + 底沿亮唇（板厚）+ 表面颗粒
+ *   .lg-well   从板上挖下去：内阴影压上沿、下沿留亮线，无外投影
+ *   .lg-plate  压在板上的薄片：顶沿 1px 高光 + 短影，按下位移 1px
+ * 凹与凸必须成对出现；只做一边读不出拟物。
+ *
+ * 颗粒是磨砂感的真正来源，统一由 .lg-slab 的 ::after 铺在最上层：
+ * 白天 multiply 只压暗、夜里 screen 只提亮，对两种正文的锐度影响都小。
+ */
+.lg-theme { font-family: var(--lg-font-body); color: var(--lg-color-ink); }
+.lg-theme *, .lg-theme *::before, .lg-theme *::after { box-sizing: border-box; }
+.lg-theme button, .lg-theme input, .lg-theme textarea, .lg-theme select { font: inherit; }
+.lg-theme button { -webkit-tap-highlight-color: var(--lg-color-clear); }
+.lg-theme :focus-visible { outline: 3px solid var(--lg-color-focus); outline-offset: 5px; }
+
+/* ── 板：整窗那块磨砂亚克力 ──────────────────────── */
+.lg-slab {
+  position: relative; isolation: isolate;
+  border: 0;
+  border-radius: var(--lg-radius-panel);
+  background: var(--lg-slab-fill);
+  box-shadow:
+    var(--lg-slab-rim-top),
+    var(--lg-slab-rim-line),
+    var(--lg-slab-rim-bottom);
+  -webkit-backdrop-filter: blur(20px) saturate(1.04);
+  backdrop-filter: blur(20px) saturate(1.04);
+}
+/* 板厚：底沿一道亮唇压在暗缝上。不做这道，板就是一层色，不是一块东西。 */
+.lg-slab::before {
+  content: ''; position: absolute; left: 0; right: 0; bottom: 0;
+  height: var(--lg-slab-lip-height); border-radius: inherit; pointer-events: none; z-index: 6;
+  background: linear-gradient(180deg,
+    var(--lg-slab-lip-seam) 0,
+    var(--lg-slab-lip-seam) 1px,
+    var(--lg-slab-lip-light) 1px,
+    var(--lg-slab-lip-shade) 50%,
+    transparent 100%);
+  box-shadow: 0 -5px 9px -6px var(--lg-slab-lip-glow);
+}
+/* 颗粒：铺在最上层，内容压在它下面 */
+.lg-slab::after {
+  content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; z-index: 5;
+  background-image: var(--lg-grain-url);
+  background-size: var(--lg-grain-size);
+  background-repeat: repeat;
+  opacity: var(--lg-grain-opacity);
+  mix-blend-mode: var(--lg-grain-blend);
+}
+.lg-slab > * { position: relative; z-index: 1; }
+/* 颗粒与板厚压在所有子元素之上（包括带 z-index 的标题栏与底栏）：
+   整块板是一体的，颗粒不该在某个子元素处断开。 */
+
+/* ── 槽：从板上挖下去 ─────────────────────────── */
+.lg-well {
+  border: 0; border-radius: var(--lg-radius-control);
+  background: var(--lg-well-fill);
+  box-shadow: var(--lg-well-shadow), var(--lg-well-rim), var(--lg-well-line);
+}
+
+/* ── 凸：压在板上的薄片 ───────────────────────── */
+.lg-plate {
+  position: relative; isolation: isolate;
+  border: 0; border-radius: var(--lg-radius-control);
+  background: var(--lg-plate-fill);
+  box-shadow:
+    var(--lg-plate-rim-top),
+    var(--lg-plate-rim-line),
+    var(--lg-plate-rim-bottom),
+    var(--lg-plate-shade),
+    var(--lg-plate-shadow);
+  transition: transform var(--lg-duration) var(--lg-ease),
+              box-shadow var(--lg-duration) var(--lg-ease);
+}
+.lg-plate:active:not(:disabled) {
+  transform: translate(1px, 2px);
+  box-shadow:
+    var(--lg-plate-rim-top),
+    var(--lg-plate-rim-line),
+    var(--lg-plate-press);
+}
+
+/* ── 玻璃面（v3.0 起是磨砂薄片，不是亮面玻璃）──── */
+.lg-glass {
+  position: relative; isolation: isolate;
+  border: 0;
+  border-radius: var(--lg-radius-panel);
+  background: var(--lg-glass-fill);
+  box-shadow:
+    var(--lg-plate-rim-top),
+    var(--lg-plate-rim-line),
+    var(--lg-plate-rim-bottom),
+    var(--lg-plate-shadow);
+  -webkit-backdrop-filter: blur(14px) saturate(1.05);
+  backdrop-filter: blur(14px) saturate(1.05);
+}
+/* 渐变描边：遮住内部、只留 1px */
+.lg-glass::before {
+  content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  padding: 1px;
+  background: var(--lg-border-gradient);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+}
+
+/* 厚玻璃外壳：同配方，只是投影更深、模糊更足 */
+.lg-shell {
+  border-radius: var(--lg-radius-shell);
+  background: var(--lg-slab-fill);
+  box-shadow:
+    var(--lg-slab-rim-top),
+    var(--lg-slab-rim-line),
+    var(--lg-plate-shadow);
+  -webkit-backdrop-filter: blur(20px) saturate(1.06);
+  backdrop-filter: blur(20px) saturate(1.06);
+}
+
+/* ── 按钮 ─────────────────────────────────────── */
+.lg-button {
+  min-height: var(--lg-control-height); padding: 13px 22px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 9px;
+  position: relative; isolation: isolate; border: 0;
+  border-radius: var(--lg-radius-pill);
+  background: var(--lg-glass-fill);
+  color: var(--lg-color-ink); font-weight: 600; line-height: 1.25; white-space: nowrap; cursor: pointer;
+  box-shadow:
+    var(--lg-plate-rim-top),
+    var(--lg-plate-rim-line),
+    var(--lg-plate-rim-bottom),
+    var(--lg-plate-shadow);
+  transition: transform var(--lg-duration) var(--lg-ease),
+              box-shadow var(--lg-duration) var(--lg-ease),
+              background-color var(--lg-duration) var(--lg-ease);
+}
+.lg-button::before {
+  content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  padding: 1px; background: var(--lg-border-gradient);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+}
+.lg-button--primary {
+  background: var(--lg-forest-fill); color: var(--lg-color-white);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / .30),
+    inset 0 -2px 0 rgb(0 0 0 / .22),
+    var(--lg-shadow-forest);
+}
+.lg-button--primary::before { background: linear-gradient(150deg, rgb(255 255 255 / .30), rgb(255 255 255 / .05) 60%, rgb(255 255 255 / .16)); }
+.lg-button--mint {
+  background: var(--lg-mint-fill); color: var(--lg-mint-ink);
+  box-shadow: var(--lg-mint-shadow);
+}
+.lg-button--icon { width: var(--lg-control-height); padding: 0; flex-shrink: 0; }
+.lg-button--small { min-height: 44px; padding: 10px 18px; font-size: 14px; }
+.lg-button[aria-pressed='true'] { background: var(--lg-forest-fill); color: var(--lg-color-white); box-shadow: var(--lg-shadow-forest); }
+.lg-button:active:not(:disabled) {
+  transform: translate(1px, 2px);
+  box-shadow: var(--lg-plate-rim-top), var(--lg-plate-rim-line), var(--lg-plate-press);
+}
+.lg-button--primary:active:not(:disabled) {
+  transform: translate(1px, 2px);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .18), inset 0 -1px 0 rgb(0 0 0 / .18), 0 1px 2px rgb(12 74 41 / .30);
+}
+.lg-button:disabled { cursor: not-allowed; color: var(--lg-color-muted); }
+.lg-button--primary:disabled { color: var(--lg-color-white); }
+.lg-button:disabled > * { opacity: .55; }
+.lg-button[aria-busy='true'] { cursor: progress; }
+.lg-button[data-state='success'] { color: var(--lg-mint-ink); background: var(--lg-mint-fill); }
+.lg-button[data-state='error'] { color: var(--lg-color-error); }
+
+/* ── 输入：v3.0 起是挖出来的槽，不是浮起来的片 ── */
+.lg-field { display: grid; gap: var(--lg-space-sm); min-width: 0; }
+.lg-field > label { font-size: 14px; font-weight: 600; }
+.lg-input {
+  width: 100%; min-width: 0; min-height: var(--lg-control-height); padding: 15px 20px;
+  border: 0; border-radius: var(--lg-radius-control);
+  background: var(--lg-well-fill); color: var(--lg-color-ink);
+  box-shadow: var(--lg-well-shadow), var(--lg-well-rim), var(--lg-well-line);
+  line-height: 1.6;
+}
+textarea.lg-input { min-height: 96px; resize: vertical; }
+.lg-input::placeholder { color: var(--lg-color-muted); opacity: 1; }
+.lg-input:disabled { cursor: not-allowed; color: var(--lg-color-muted); }
+.lg-input[aria-invalid='true'] { box-shadow: 0 0 0 2px var(--lg-color-error), var(--lg-well-shadow); }
+.lg-input[data-state='success'] { box-shadow: 0 0 0 2px var(--lg-color-success), var(--lg-well-shadow); }
+.lg-helper { min-height: 1.5em; margin: 0; font-size: 13px; line-height: 1.5; color: var(--lg-color-muted); }
+.lg-helper[data-state='error'] { color: var(--lg-color-error); }
+
+/* ── 开关 ─────────────────────────────────────── */
+.lg-toggle { position: relative; display: inline-flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; min-height: 44px; }
+.lg-toggle input { position: absolute; right: 0; width: 62px; height: 44px; margin: 0; opacity: 0; cursor: pointer; z-index: 1; }
+.lg-toggle-track {
+  display: block; flex-shrink: 0; width: 62px; height: 36px; border-radius: var(--lg-radius-pill);
+  background: var(--lg-well-fill);
+  box-shadow: var(--lg-well-shadow), var(--lg-well-rim), var(--lg-well-line);
+}
+.lg-toggle-track::after {
+  content: ''; display: block; width: 28px; height: 28px; margin: 4px; border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgb(16 40 26 / .34), inset 0 -1px 0 rgb(16 40 26 / .10);
+  transition: transform var(--lg-duration) var(--lg-ease);
+}
+.lg-toggle input:checked + .lg-toggle-track { background: var(--lg-forest-fill); }
+.lg-toggle input:checked + .lg-toggle-track::after { transform: translateX(26px); }
+.lg-toggle input:focus-visible + .lg-toggle-track { outline: 3px solid var(--lg-color-focus); outline-offset: 4px; }
+.lg-toggle input:disabled + .lg-toggle-track { opacity: .5; }
+
+/* ── 昼夜开关：轨道是槽，滑钮是凸片 ──────────────
+ * 与 .lg-toggle 的区别：这个是「按下即切」的按钮，不是带文案的表单项，
+ * 状态由 aria-checked 表示，滑钮上放图标而不是文字。 */
+.lg-switch {
+  position: relative; flex: none; width: 52px; height: 30px; padding: 0; border: 0;
+  border-radius: var(--lg-radius-pill); cursor: pointer;
+  background: var(--lg-well-fill);
+  box-shadow: var(--lg-well-shadow), var(--lg-well-rim), var(--lg-well-line);
+  -webkit-tap-highlight-color: var(--lg-color-clear);
+}
+.lg-switch-knob {
+  position: absolute; top: 3px; left: 3px; width: 24px; height: 24px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: #fff; color: var(--lg-color-forest-deep);
+  box-shadow: 0 1px 3px rgb(16 40 26 / .38), inset 0 -1px 0 rgb(16 40 26 / .10);
+  transition: transform var(--lg-duration) var(--lg-ease),
+              background var(--lg-duration) var(--lg-ease),
+              color var(--lg-duration) var(--lg-ease);
+}
+.lg-switch-knob svg { width: 14px; height: 14px; display: block; }
+.lg-switch[aria-checked='true'] .lg-switch-knob { transform: translateX(22px); }
+.lg-switch:active .lg-switch-knob { box-shadow: 0 1px 1px rgb(16 40 26 / .40); }
+:root[data-theme='night'] .lg-switch-knob,
+:root[data-theme='dark'] .lg-switch-knob { background: #b9cdc0; color: #16301f; }
+
+/* ── 圆形件（对应参考图 03）─────────────────────
+ * 填充是 45° 的四段渐变，两端完全透明，所以边缘会自然「化」进背景；
+ * 阴影比卡片更紧（3px / 3px / 4px），中线只留一道极淡的内高光。 */
+.lg-orb {
+  position: relative; isolation: isolate;
+  width: 216px; aspect-ratio: 1; border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--lg-glass-veil);
+  box-shadow: var(--lg-shadow-orb), inset 0 1px 0 rgb(255 255 255 / .60);
+}
+.lg-orb-core {
+  position: relative; width: 100%; height: 100%; border-radius: 50%;
+  display: grid; place-items: center;
+  background: radial-gradient(circle at 34% 28%, rgb(255 255 255 / .55), rgb(255 255 255 / .10) 62%, transparent 78%);
+}
+
+/* ── 状态标记 ─────────────────────────────────── */
+.lg-badge {
+  display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600;
+  white-space: nowrap; padding: 6px 11px; border: 0; border-radius: var(--lg-radius-pill);
+  background: var(--lg-chip-fill);
+  box-shadow: var(--lg-chip-rim), var(--lg-lead-line), var(--lg-shadow-rest);
+}
+
+@media (hover: hover) {
+  .lg-button:hover:not(:disabled) { transform: translateY(-1px); box-shadow: var(--lg-plate-rim-top), var(--lg-plate-rim-line), var(--lg-shadow-raised); }
+  .lg-input:hover:not(:disabled) { background: var(--lg-hover-fill); }
+  .lg-plate:hover:not(:disabled) { box-shadow: var(--lg-plate-rim-top), var(--lg-plate-rim-line), var(--lg-plate-rim-bottom), var(--lg-plate-shade), var(--lg-shadow-raised); }
+  .lg-switch:hover .lg-switch-knob { box-shadow: 0 2px 5px rgb(16 40 26 / .42), inset 0 -1px 0 rgb(16 40 26 / .10); }
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .lg-glass, .lg-shell, .lg-slab, .lg-button { background: var(--lg-surface-fallback); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lg-theme *, .lg-theme *::before, .lg-theme *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
+  .lg-button:hover:not(:disabled), .lg-button:active:not(:disabled) { transform: none; }
+  .lg-plate:active:not(:disabled) { transform: none; }
+}

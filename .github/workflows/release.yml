@@ -1,0 +1,121 @@
+name: build
+
+# 每次推送先出两个平台的包做检查；推 v* 标签时再把它们挂到同一个 Release。
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      value: ${{ steps.read.outputs.value }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: read
+        run: echo "value=$(node -p "require('./win/src-tauri/tauri.conf.json').version")" >> "$GITHUB_OUTPUT"
+
+  windows:
+    needs: version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: win/src-tauri
+
+      - name: 跑单元测试
+        working-directory: win/src-tauri
+        run: cargo test --release
+
+      - name: 装 Tauri CLI
+        run: npm install -g @tauri-apps/cli@2
+
+      # 只编可执行文件，不打安装包：交付物是单文件便携 exe
+      - name: 编译
+        working-directory: win
+        run: npx tauri build --no-bundle
+
+      - name: 整理产物
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp win/src-tauri/target/release/pi-launcher.exe \
+             "dist/pi-launcher-${{ needs.version.outputs.value }}-windows-x64.exe"
+          ls -l dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-exe
+          path: dist/*.exe
+          if-no-files-found: error
+
+  macos:
+    needs: version
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      # build.sh 里先跑 selftest，失败就中止，不产出包
+      - name: 构建 App（含自检）
+        run: ./build.sh
+
+      - name: 打 dmg
+        run: |
+          set -euo pipefail
+          STAGE="$(mktemp -d)"
+          cp -R "PI 项目启动器.app" "$STAGE/"
+          ln -s /Applications "$STAGE/Applications"
+          mkdir -p dist
+          hdiutil create -volname "PI 项目启动器" -srcfolder "$STAGE" -ov -format UDZO \
+            "dist/pi-launcher-${{ needs.version.outputs.value }}-macos-arm64.dmg"
+          ls -l dist
+
+      - name: 确认 dmg 里是 arm64
+        run: |
+          lipo -archs "PI 项目启动器.app/Contents/MacOS/PI 项目启动器"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg
+          path: dist/*.dmg
+          if-no-files-found: error
+
+  release:
+    needs: [version, windows, macos]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: 发布到 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          body: |
+            ## 安装
+
+            **Windows**：下载 `*-windows-x64.exe`，双击即可运行，不需要安装。
+            第一次打开会弹 SmartScreen，点「更多信息 → 仍要运行」。
+            需要系统已带 WebView2（Windows 11 与更新过的 Windows 10 都自带）。
+
+            **macOS**：下载 `*-macos-arm64.dmg`，打开后把「PI 项目启动器」拖进「应用程序」。
+            只支持 Apple 芯片。第一次打开会被系统拦下，到「系统设置 → 隐私与安全性」点「仍要打开」。
+
+            安装后需要本机已有 `pi`（https://pi.dev）与 Windows Terminal。

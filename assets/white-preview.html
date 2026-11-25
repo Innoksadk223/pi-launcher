@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>白底图标确认</title>
+<style>
+  body{margin:0;background:#14161c;color:#eef1f6;font:14px/1.5 -apple-system,"PingFang SC",sans-serif;
+       padding:30px;display:flex;flex-direction:column;align-items:center;gap:24px}
+  h1{font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:#8b93a7;margin:0;font-weight:600}
+  .row{display:flex;gap:28px;flex-wrap:wrap;justify-content:center}
+  figure{margin:0;display:flex;flex-direction:column;align-items:center;gap:12px}
+  .stage{width:240px;height:240px;border-radius:12px;display:grid;place-items:center}
+  .dark{background:linear-gradient(160deg,#1d2130,#0e1016)}
+  .light{background:linear-gradient(160deg,#e8ecf4,#cdd4e2)}
+  .sizes{display:flex;align-items:flex-end;gap:16px}
+  figcaption{font-size:12px;color:#8b93a7;text-align:center}
+  img{display:block}
+</style></head>
+<body>
+  <h1>白底图标 · 最终确认</h1>
+  <div class="row">
+    <figure><div class="stage dark"><img src="icon/AppIcon-white-1024.png" width="200" height="200" alt=""></div>
+      <figcaption>深色桌面</figcaption></figure>
+    <figure><div class="stage light"><img src="icon/AppIcon-white-1024.png" width="200" height="200" alt=""></div>
+      <figcaption>浅色桌面</figcaption></figure>
+    <figure>
+      <div class="stage dark"><div class="sizes">
+        <img src="icon/AppIcon-white-1024.png" width="128" height="128" alt="">
+        <img src="icon/AppIcon-white-1024.png" width="64" height="64" alt="">
+        <img src="icon/AppIcon-white-1024.png" width="32" height="32" alt="">
+        <img src="icon/AppIcon-white-1024.png" width="16" height="16" alt="">
+      </div></div>
+      <figcaption>128 / 64 / 32 / 16px<br>Dock 实际尺寸</figcaption></figure>
+  </div>
+</body></html>

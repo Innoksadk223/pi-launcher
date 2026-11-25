@@ -1,0 +1,18 @@
+# 构建产物
+PI 项目启动器.app/
+*.dmg
+dist/
+dist-win/
+
+# Rust / Tauri
+win/src-tauri/target/
+win/src-tauri/gen/schemas/
+
+# 本机工具产生的临时内容
+ui/.playwright-cli/
+.agents/
+.DS_Store
+/tmp/
+
+# 设计过程中的计划与草稿
+PLAN-*.md
