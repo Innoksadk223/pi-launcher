@@ -43,6 +43,22 @@ jobs:
       - name: 装 Tauri CLI
         run: npm install -g @tauri-apps/cli@2
 
+      # probe 用「node.exe 且命令行里含 pi-coding-agent / pi-launcher.js」认出真 pi。
+      # 这条假设一旦不成立，后果是每次新会话都 12 秒超时；所以每轮都在真机上核一次。
+      - name: 核对真 pi 的启动命令
+        shell: pwsh
+        run: |
+          npm install -g @earendil-works/pi-coding-agent
+          $cmd = Get-Command pi -ErrorAction SilentlyContinue
+          if (-not $cmd) { throw "装完仍找不到 pi" }
+          Write-Host "pi -> $($cmd.Source)"
+          $shim = Get-Content $cmd.Source -Raw
+          Write-Host $shim
+          if ($shim -notmatch 'pi-coding-agent|pi-launcher\.js') {
+            throw "shim 里既没有 pi-coding-agent 也没有 pi-launcher.js，probe 的身份判据需要重看"
+          }
+          pi --version
+
       # 只编可执行文件，不打安装包：交付物是单文件便携 exe
       - name: 编译
         working-directory: win

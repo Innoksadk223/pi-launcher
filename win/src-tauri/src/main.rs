@@ -214,9 +214,14 @@ impl AppBridge {
             let saved = terminal::saved_selection();
             let installed = terminal::installed();
             let (picked, fell_back) = terminal::resolve(saved.as_deref(), &installed);
-            st.terminals = installed;
+            st.terminals = installed.clone();
             st.selected_terminal = picked;
-            if fell_back {
+            // 连一个能用的终端都没有：启动前就说清楚，不让用户点了卡片才失败
+            if installed.is_empty() {
+                st.fallback_notice = Some(
+                    "没找到 Windows Terminal，请先在 Microsoft Store 安装".to_string(),
+                );
+            } else if fell_back {
                 if let Some(kind) = picked {
                     let saved_name = saved
                         .as_deref()

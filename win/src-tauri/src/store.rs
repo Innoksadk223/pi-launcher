@@ -17,7 +17,7 @@ pub fn default_data_dir() -> PathBuf {
         .join("PI Launcher")
 }
 
-/// 默认数据文件：%APPDATA%\PI Project Launcher\projects.txt
+/// 默认数据文件：%APPDATA%\PI Launcher\projects.txt
 pub fn default_file_path() -> PathBuf {
     default_data_dir().join("projects.txt")
 }
