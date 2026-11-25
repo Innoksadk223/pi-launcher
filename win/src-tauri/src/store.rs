@@ -152,9 +152,22 @@ pub fn atomic_write(file_path: &Path, body: &str) -> bool {
     let Some(name) = file_path.file_name().and_then(|s| s.to_str()) else {
         return false;
     };
-    let tmp = dir.join(format!("{name}.tmp"));
+    // 临时名带上进程号与纳秒，避免可预测的 `.tmp` 被同用户预置链接/被另一个实例抢用；
+    // create_new 保证「是我们新建的」才写，不跟随已存在的文件
+    let unique = format!(
+        "{name}.{}.{}.tmp",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.subsec_nanos())
+            .unwrap_or(0)
+    );
+    let tmp = dir.join(unique);
     let write_res = (|| -> std::io::Result<()> {
-        let mut f = fs::File::create(&tmp)?;
+        let mut f = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)?;
         use std::io::Write;
         f.write_all(body.as_bytes())?;
         f.sync_all()?;

@@ -7,6 +7,7 @@ use crate::terminal::{self, TerminalKind};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LaunchError {
     TerminalMissing(String),
+    PiMissing,
     Unsupported(String),
     SpawnFailed(String),
     InvalidArgument(String),
@@ -17,6 +18,12 @@ impl fmt::Display for LaunchError {
         match self {
             LaunchError::TerminalMissing(name) => {
                 write!(f, "没找到 {name}，请先在 Microsoft Store 安装 Windows Terminal。")
+            }
+            LaunchError::PiMissing => {
+                write!(
+                    f,
+                    "没找到 pi，请先安装 PI（pip/npm 装好后 `pi` 应能在命令提示符里直接运行）。"
+                )
             }
             LaunchError::Unsupported(name) => {
                 write!(f, "{name} 还不支持自动启动。")
@@ -36,20 +43,26 @@ impl std::error::Error for LaunchError {}
 /// Windows 下解析 `pi` 的可执行命令：
 /// - 优先把用户指定的测试命令或 `pi` 传给 `cmd /c`，若 `pi.cmd` / `pi.exe` / `pi` 不在 PATH 里，
 ///   在 `%USERPROFILE%\.pi\agent\bin\pi.cmd` 再查一次兜底。
-pub fn resolve_pi_invocation(pi_command: &str) -> String {
+pub fn resolve_pi_invocation(pi_command: &str) -> Option<String> {
     if pi_command != "pi" {
-        return pi_command.to_string();
+        return Some(pi_command.to_string());
     }
     if in_path("pi.cmd") || in_path("pi.exe") || in_path("pi.bat") {
-        return "pi".to_string();
+        return Some("pi".to_string());
     }
-    if let Some(home) = dirs::home_dir() {
-        let managed = home.join(".pi").join("agent").join("bin").join("pi.cmd");
-        if managed.is_file() {
-            return managed.to_string_lossy().into_owned();
+    // PI 自己会把启动脚本放在 agent 目录下，PATH 里没有时按这个位置找
+    let agent_dir = std::env::var_os("PI_CODING_AGENT_DIR")
+        .map(std::path::PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|h| h.join(".pi").join("agent")));
+    if let Some(dir) = agent_dir {
+        for name in ["pi.cmd", "pi.exe", "pi.bat"] {
+            let managed = dir.join("bin").join(name);
+            if managed.is_file() {
+                return Some(managed.to_string_lossy().into_owned());
+            }
         }
     }
-    "pi".to_string()
+    None
 }
 
 fn in_path(name: &str) -> bool {
@@ -188,7 +201,11 @@ pub fn open(
     let Some(wt_exe) = terminal::find_wt_exe() else {
         return Err(LaunchError::TerminalMissing(terminal.name.to_string()));
     };
-    let resolved_pi = resolve_pi_invocation(pi_command);
+    // 没装 pi 时早点说清楚：交给 cmd 只会得到一行「不是内部或外部命令」，
+    // 启动器这边还会把超时显示成「已开窗口，但没等到 pi」，等于报了个假成功。
+    let Some(resolved_pi) = resolve_pi_invocation(pi_command) else {
+        return Err(LaunchError::PiMissing);
+    };
     let args = build_wt_args(project_path, session_path, &resolved_pi)?;
 
     let mut cmd = Command::new(&wt_exe);

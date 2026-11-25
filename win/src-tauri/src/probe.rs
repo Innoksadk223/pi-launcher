@@ -31,7 +31,7 @@ pub fn normalize_cwd_for_compare(raw: &str) -> String {
         while s.len() > 3 && s.ends_with('\\') {
             s.pop();
         }
-        s.to_ascii_lowercase()
+        s.to_lowercase()
     } else {
         let mut s = stripped;
         while s.len() > 1 && s.ends_with('/') {
